@@ -43,6 +43,11 @@ def _detect_upc_valid_rate(values: list[str]) -> float:
 
 def _generate_fake(fake: Faker, value: str, detected_type: str) -> str:
     if detected_type == "name":
+        # Person-name columns get person fakes. (Previously every name column got
+        # a company name from the retail pool — the 07-31 audit's P2 leak of
+        # persons rendered as businesses.)
+        return fake.name()
+    elif detected_type == "company":
         return fake.retail_name()
     elif detected_type == "email":
         return fake.realistic_email()

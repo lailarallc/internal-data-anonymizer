@@ -32,6 +32,48 @@ def _anonymize_value(value, mapping: dict[str, str], column: str):
     return mapping[key]
 
 
+class AnonymizationLeakError(ValueError):
+    """Raised when a transforming column returns its input unchanged.
+
+    The cardinal failure mode this guards against is the 07-31 audit's date-jitter
+    no-op: ``apply_jitter`` coerced dates to NaN and returned the ORIGINAL series, so
+    the export leaked real dates while the operator believed they were jittered. Any
+    non-passthrough column that comes back byte-for-byte identical to its input is a
+    leak — fail loud rather than export it.
+    """
+
+
+def _assert_transformed(
+    col: str, original: pd.Series, result: pd.Series, strategy: str
+) -> None:
+    """Fail loud if a transforming strategy returned every value unchanged.
+
+    Skips legitimate no-op cases: a column with <=1 distinct non-blank value
+    (nothing to disguise), and numeric jitter (clamping/rounding can validly land
+    a boundary value back on its original — the perturbation is real elsewhere).
+    A fully-unchanged non-numeric jitter column (e.g. dates) or any unchanged
+    generative column (fake/format-preserve/hash) is always a leak.
+    """
+    if strategy in ("passthrough", "drop"):
+        return
+    mask = ~original.map(_is_blank)
+    if mask.sum() == 0:
+        return
+    o = original[mask].astype(str).reset_index(drop=True)
+    r = result[mask].astype(str).reset_index(drop=True)
+    if o.nunique() <= 1:
+        return
+    if strategy == "jitter":
+        numeric_share = pd.to_numeric(o, errors="coerce").notna().mean()
+        if numeric_share >= 0.8:
+            return
+    if o.equals(r):
+        raise AnonymizationLeakError(
+            f"column '{col}' (strategy '{strategy}') returned every value "
+            "unchanged — refusing to export original data."
+        )
+
+
 def apply_mappings(
     file_path: Path,
     column_mappings: dict[str, dict[str, str]],
@@ -61,12 +103,17 @@ def apply_mappings(
             continue
         elif strategy == "jitter":
             if jitter_results and col in jitter_results:
+                original = df[col]
+                _assert_transformed(col, original, jitter_results[col], strategy)
                 df[col] = jitter_results[col]
         elif strategy in ("fake", "format-preserve", "hash"):
             mapping = column_mappings.get(col, {})
-            df[col] = df[col].map(
+            original = df[col]
+            transformed = df[col].map(
                 lambda v, m=mapping, c=col: _anonymize_value(v, m, c)
             )
+            _assert_transformed(col, original, transformed, strategy)
+            df[col] = transformed
 
     if drop_cols:
         df = df.drop(columns=drop_cols)

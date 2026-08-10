@@ -195,3 +195,56 @@ class TestMappingUniqueness:
         values = [f"row-{i}" for i in range(500)]
         result = generate_mappings(values, "hash", "col", "salt", "generic_string")
         assert len(set(result.values())) == 500
+
+
+class TestReversibilityAtScale:
+    """R28/R29 at scale: 10k distinct originals stay 1:1 and fully reversible."""
+
+    def test_10k_company_names_are_1_to_1_reversible(self):
+        # The retail pool has ~190 names, so 10,000 distinct originals force heavy
+        # collision handling. Every original must still map to a distinct fake, and
+        # the fake -> original inverse must recover every original.
+        values = [f"Retailer {i}" for i in range(10_000)]
+        result = generate_mappings(values, "fake", "retailer_name", "salt", "company")
+        assert len(result) == 10_000
+        assert len(set(result.values())) == 10_000  # no two originals share a fake
+        reverse = {fake: orig for orig, fake in result.items()}
+        assert len(reverse) == 10_000
+        for orig in values:
+            assert reverse[result[orig]] == orig  # round-trips uniquely
+
+    def test_10k_person_names_are_1_to_1_reversible(self):
+        values = [f"Person {i}" for i in range(10_000)]
+        result = generate_mappings(values, "fake", "customer_name", "salt", "name")
+        assert len(result) == 10_000
+        assert len(set(result.values())) == 10_000
+
+    def test_10k_reversibility_is_deterministic(self):
+        values = [f"Retailer {i}" for i in range(10_000)]
+        r1 = generate_mappings(values, "fake", "retailer_name", "salt", "company")
+        r2 = generate_mappings(values, "fake", "retailer_name", "salt", "company")
+        assert r1 == r2
+
+
+class TestPersonVsCompanyFakes:
+    """Person-name columns get person fakes; business columns get company fakes."""
+
+    def test_name_type_produces_person_not_company(self):
+        from app.services.fakers.retail import ALL_NAMES
+
+        values = ["Jane Doe", "John Smith", "Maria Garcia"]
+        result = generate_mappings(values, "fake", "customer_name", "salt", "name")
+        for v in values:
+            # A person fake must not come from the curated company pool.
+            assert result[v] not in ALL_NAMES
+
+    def test_company_type_produces_company_name(self):
+        from app.services.fakers.retail import ALL_NAMES
+
+        values = ["Walmart", "Target"]
+        result = generate_mappings(values, "fake", "retailer", "salt", "company")
+        for v in values:
+            # Value comes from the pool (a dedup suffix like " 2" may be appended).
+            assert any(
+                result[v] == n or result[v].startswith(n + " ") for n in ALL_NAMES
+            )

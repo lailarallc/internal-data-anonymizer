@@ -48,6 +48,45 @@ class TestFailClosed:
         assert list(out["name"]) == ["aaa", "bbb"]
 
 
+class TestLeakGuard:
+    """A transforming column that returns its input unchanged must fail loud.
+
+    Guards the exact 07-31 audit failure: jitter returned the original series and
+    the export leaked real values while the operator believed they were anonymized.
+    """
+
+    def test_generative_column_returning_input_unchanged_raises(self, tmp_path):
+        # Identity mapping simulates a broken transform that echoes originals.
+        f = _write_csv(tmp_path, "name\nAlice\nBob\nCarol\n")
+        with pytest.raises(ValueError, match="unchanged"):
+            apply_mappings(
+                f,
+                {"name": {"Alice": "Alice", "Bob": "Bob", "Carol": "Carol"}},
+                {"name": "fake"},
+            )
+
+    def test_jitter_returning_dates_unchanged_raises(self, tmp_path):
+        # The literal audit bug: jitter_results hands back the original date series.
+        f = _write_csv(tmp_path, "d\n2024-01-01\n2024-02-01\n2024-03-01\n")
+        original = pd.read_csv(f, dtype=str)["d"]
+        with pytest.raises(ValueError, match="unchanged"):
+            apply_mappings(f, {}, {"d": "jitter"}, jitter_results={"d": original})
+
+    def test_constant_column_unchanged_is_allowed(self, tmp_path):
+        # A single-value column can't be disguised into distinct fakes; unchanged is OK.
+        f = _write_csv(tmp_path, "flag\nX\nX\nX\n")
+        out = apply_mappings(f, {"flag": {"X": "X"}}, {"flag": "hash"})
+        assert list(out["flag"]) == ["X", "X", "X"]
+
+    def test_numeric_jitter_landing_on_original_is_allowed(self, tmp_path):
+        # Numeric jitter may clamp/round a boundary back to its original; a real
+        # jitter result (mostly changed) must not trip the guard.
+        f = _write_csv(tmp_path, "q\n10\n20\n30\n40\n50\n")
+        jitter = pd.Series(["10", "21", "29", "41", "50"])  # 2 unchanged, rest moved
+        out = apply_mappings(f, {}, {"q": "jitter"}, jitter_results={"q": jitter})
+        assert list(out["q"]) == ["10", "21", "29", "41", "50"]
+
+
 class TestBlankPreservation:
     def test_blank_cells_stay_blank(self, tmp_path):
         # Second column keeps the middle line from being a skipped blank line.

@@ -8,3 +8,6 @@ faker>=25.0.0
 aiofiles>=24.0.0
 sse-starlette>=2.0.0
 python-multipart>=0.0.9
+# Client mode (engagement.yml intake + provenance report). Path install:
+#   pip install -e ../../engagement-template/lib
+# lailara-engagement

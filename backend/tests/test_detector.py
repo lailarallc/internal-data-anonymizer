@@ -95,6 +95,31 @@ class TestClassifyColumn:
         assert detected == "generic_string"
         assert strategy == "hash"
 
+    def test_company_named_column_detected_as_company(self):
+        series = pd.Series([
+            "Harvest Market", "Fresh Fields", "Green Basket",
+            "Valley Foods", "Meadow Mart",
+        ])
+        detected, strategy = _classify_column(series, "retailer_name")
+        assert detected == "company"
+        assert strategy == "fake"
+
+    def test_person_name_column_defaults_to_person(self):
+        series = pd.Series(["John Smith", "Jane Doe", "Bob Jones", "Al Brown", "Cy Young"])
+        detected, strategy = _classify_column(series, "customer_name")
+        assert detected == "name"  # ambiguous header -> person (safe direction)
+        assert strategy == "fake"
+
+    def test_header_hint_routes_identical_values(self):
+        # Same name-like values classify by header: a business hint -> company,
+        # anything else -> person.
+        series = pd.Series([
+            "Harvest Market", "Fresh Fields", "Green Basket",
+            "Valley Foods", "Meadow Mart",
+        ])
+        assert _classify_column(series, "vendor")[0] == "company"
+        assert _classify_column(series, "contact")[0] == "name"
+
     def test_empty_column(self):
         series = pd.Series([None, None, None])
         detected, strategy = _classify_column(series)

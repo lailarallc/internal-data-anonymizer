@@ -27,8 +27,25 @@ PHONE_RE = re.compile(
 SKU_RE = re.compile(r"^[A-Za-z]{1,5}[-_][A-Za-z0-9]{1,8}([-_][A-Za-z0-9]{1,5})?$")
 NAME_RE = re.compile(r"^[A-Za-z\s\.\'\-]+$")
 
+# Column-header hints that a name-like column holds business/retailer names
+# (which get company fakes) rather than people (who get person fakes). Value
+# text alone can't tell "John Smith" from "Harvest Market"; the header can.
+# Deliberately conservative — an ambiguous header (e.g. "name", "customer")
+# defaults to person, which is the safe direction for the "person columns got
+# company names" leak. Client mode can override any column's type in engagement.yml.
+COMPANY_NAME_HINTS = (
+    "retailer", "retail", "vendor", "supplier", "store", "shop",
+    "company", "merchant", "chain", "distributor", "brand", "banner",
+    "wholesaler", "manufacturer",
+)
 
-def _classify_column(series: pd.Series) -> tuple[str, str]:
+
+def _looks_like_company_column(column_name: str) -> bool:
+    n = (column_name or "").lower()
+    return any(hint in n for hint in COMPANY_NAME_HINTS)
+
+
+def _classify_column(series: pd.Series, column_name: str = "") -> tuple[str, str]:
     non_null = series.dropna().astype(str)
     non_null = non_null[non_null.str.strip() != ""]
     if len(non_null) == 0:
@@ -71,9 +88,12 @@ def _classify_column(series: pd.Series) -> tuple[str, str]:
     if numeric_series.notna().sum() / total >= THRESHOLD:
         return "numeric", "jitter"
 
-    # Name-like check (no digits, mostly titlecase/words)
+    # Name-like check (no digits, mostly titlecase/words). Route business-named
+    # columns to company fakes and everything else to person fakes.
     name_matches = non_null.apply(lambda v: bool(NAME_RE.match(v.strip()))).sum()
     if name_matches / total >= THRESHOLD:
+        if _looks_like_company_column(column_name):
+            return "company", "fake"
         return "name", "fake"
 
     return "generic_string", "hash"
@@ -96,7 +116,7 @@ def profile_columns(df: pd.DataFrame) -> list[ColumnProfile]:
     for col in df.columns:
         series = df[col]
         non_null = series[series.astype(str).str.strip() != ""]
-        detected_type, strategy = _classify_column(series)
+        detected_type, strategy = _classify_column(series, col)
 
         sample = non_null.head(5).astype(str).tolist() if len(non_null) > 0 else []
 
