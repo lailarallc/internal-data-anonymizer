@@ -154,3 +154,13 @@ the active plan.
 - **Goal:** Build a web-based data anonymization tool with deterministic mappings, format-preserving fakes, and reverse lookup.
 - **Outcome:** Shipped. 10 implementation units, 81 backend tests, full UI flow working. Public repo with README and worked example.
 - **Deferred:** Portfolio piece on Lailara site, person-vs-product name detection, zip code format-preserving type.
+
+---
+
+## Improvement History
+
+### 2026-09-23 — Audit (health check only)
+- **Findings:** 0 critical, 5 important, 5 nice-to-have
+- **Top concerns:** 9 commits (client mode, person/company name routing, fail-loud leak guard, Fix 3 measure passthrough) sit on branch client-mode-2026-08 unmerged to main, and client-mode CI only runs against main so they never ran in CI. In client mode, format-preserve on non-measure numeric columns collides and emits non-numeric values like "82 2" (20 of 80 in a 2-digit column), and an engagement.yml `types` override does not change the strategy (a retailer column detected as generic_string stays hashed). INPUT-SPEC.md still says numeric columns are jittered, and HANDOFF/PLAN/DECISIONS have not recorded any work since 2026-07-31. Automated /security-review, /ce:review and data-science-reviewer were replaced by a manual pass; 146 backend tests pass.
+- **Action taken:** Audit only — no fixes this session
+- **Next review:** 2026-12-22
